@@ -1,10 +1,33 @@
 #!/bin/bash
 
-# Update system
+### Update system
 yum update -y
 
-# Install Python and pip
+### Install Python and pip
 yum install -y python3 python3-pip
 
-# Install AWS CLI
+### Install AWS CLI
 pip3 install awscli --upgrade
+
+
+### Create API test script
+
+cat <<EOF > /home/ec2-user/test_api.sh
+#!/bin/bash
+API_URL="$(aws ssm get-parameter --name "/greeting-api/url" --query "Parameter.Value" --output text)"
+TOKEN=\$(aws cognito-idp initiate-auth \
+  --client-id \$(aws ssm get-parameter --name "/greeting-api/cognito-client-id" --query "Parameter.Value" --output text) \
+  --auth-flow USER_PASSWORD_AUTH \
+  --auth-parameters USERNAME=user@example.com,PASSWORD=Passw0rd! | jq -r '.AuthenticationResult.IdToken')
+
+curl -H "Authorization: Bearer \$TOKEN" "\$API_URL?name=EC2User"
+EOF
+
+chmod +x /home/ec2-user/test_api.sh
+chown ec2-user:ec2-user /home/ec2-user/test_api.sh
+
+
+### Store API parameters in SSM
+
+aws ssm put-parameter --name "/greeting-api/url" --value "$(aws apigateway get-rest-apis --query "items[?name=='greeting-api'].id" --output text)" --type String
+aws ssm put-parameter --name "/greeting-api/cognito-client-id" --value "$(aws cognito-idp list-user-pool-clients --user-pool-id $(aws cognito-idp list-user-pools --max-results 1 --query "UserPools[0].Id" --output text) --query "UserPoolClients[0].ClientId" --output text)" --type String
